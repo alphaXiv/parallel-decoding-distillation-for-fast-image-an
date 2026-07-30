@@ -1,7 +1,7 @@
 {
-  "variant": "midpoint_grid8_80000",
+  "variant": "midpoint_grid8_80000_ema_seed1",
   "target": "midpoint",
-  "train_seed": 0,
+  "train_seed": 1,
   "train_steps": 80000,
   "grid_size": 8,
   "min_block": 2,
@@ -11,5 +11,6 @@
   "eval_batch": 64,
   "reference_steps": 64,
   "learning_rate": 0.00005,
-  "eval_seed": 260726004
+  "eval_seed": 260726004,
+  "ema_decay": 0.99995
 }
