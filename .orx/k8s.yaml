@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pdd-cifar-{{ORX_RUN}}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reproduce
+          image: pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-c", "$ORX_SCRIPT"]
+          resources:
+            requests:
+              nvidia.com/gpu: "4"
+              cpu: "24"
+              memory: "96Gi"
+            limits:
+              nvidia.com/gpu: "4"
+              memory: "192Gi"
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 24Gi

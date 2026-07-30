@@ -1,0 +1,15 @@
+{
+  "variant": "naive",
+  "target": "none",
+  "train_seed": 0,
+  "train_steps": 0,
+  "grid_size": 16,
+  "min_block": 2,
+  "max_block": 16,
+  "per_gpu_batch": 64,
+  "eval_samples": 1024,
+  "eval_batch": 64,
+  "reference_steps": 64,
+  "learning_rate": 0.00005,
+  "eval_seed": 260726004
+}
