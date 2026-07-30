@@ -3,6 +3,7 @@ set -euo pipefail
 
 python -m pip install --disable-pip-version-check --no-cache-dir \
   "diffusers==0.34.0" \
+  "datasets==3.6.0" \
   "huggingface_hub>=0.30,<1" \
   "safetensors>=0.4" \
   "torchvision==0.22.1" \
