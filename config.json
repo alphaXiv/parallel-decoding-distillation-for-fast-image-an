@@ -1,8 +1,8 @@
 {
-  "variant": "naive",
-  "target": "none",
+  "variant": "euler_seed0",
+  "target": "euler",
   "train_seed": 0,
-  "train_steps": 0,
+  "train_steps": 8000,
   "grid_size": 16,
   "min_block": 2,
   "max_block": 16,
