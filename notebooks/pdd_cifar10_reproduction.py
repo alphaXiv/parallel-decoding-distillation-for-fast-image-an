@@ -27,18 +27,19 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md(r"""# Parallel decoding distillation on a compact image teacher
+    mo.md(r"""
+    # Parallel decoding distillation on a compact image teacher
 
-This executable walkthrough tests whether one neural-network call can
-predict several consecutive denoising updates at once. The paper reports
-that this *parallel decoder* preserves quality at very few model
-evaluations, benefits from midpoint teacher targets, and supports
-several speed–quality settings without retraining.
+    This executable walkthrough tests whether one neural-network call can
+    predict several consecutive denoising updates at once. The paper reports
+    that this *parallel decoder* preserves quality at very few model
+    evaluations, benefits from midpoint teacher targets, and supports
+    several speed–quality settings without retraining.
 
-**Reproduction verdict: partially reproduced.** With sufficient training,
-all three algorithmic claims align in this bounded CIFAR-10 reconstruction;
-the paper's billion-parameter image and video results remain outside scope.
-""")
+    **Reproduction verdict: partially reproduced.** With sufficient training,
+    all three algorithmic claims align in this bounded CIFAR-10 reconstruction;
+    the paper's billion-parameter image and video results remain outside scope.
+    """)
     return
 
 
@@ -88,26 +89,27 @@ def _(data, metric, np, plt):
     ax.grid(alpha=0.22)
     ax.legend(frameon=False)
     fig
-    return groups, nfes, primary
+    return (primary,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""## What was reconstructed
+    mo.md(r"""
+    ## What was reconstructed
 
-A public `google/ddpm-cifar10-32` epsilon model was converted into a
-continuous probability-flow teacher. Its final convolution was repeated
-into 8 or 16 interval heads. During training, the student first rolled its
-own detached predictions to an interval inside a sampled block; the chosen
-head then regressed a stop-gradient Euler or midpoint teacher velocity.
-Euler used two sampled targets per update, matching midpoint's two teacher
-evaluations.
+    A public `google/ddpm-cifar10-32` epsilon model was converted into a
+    continuous probability-flow teacher. Its final convolution was repeated
+    into 8 or 16 interval heads. During training, the student first rolled its
+    own detached predictions to an interval inside a sampled block; the chosen
+    head then regressed a stop-gradient Euler or midpoint teacher velocity.
+    Euler used two sampled targets per update, matching midpoint's two teacher
+    evaluations.
 
-At inference, weights and biases for every head in a block were summed
-into one fused convolution. For the selected eight-head model, block sizes
-8, 4, 2, and 1 therefore use 1, 2, 4, and 8 student evaluations. A direct
-numerical check compared the fused layer with the explicit sum of heads.
-""")
+    At inference, weights and biases for every head in a block were summed
+    into one fused convolution. For the selected eight-head model, block sizes
+    8, 4, 2, and 1 therefore use 1, 2, 4, and 8 student evaluations. A direct
+    numerical check compared the fused layer with the explicit sum of heads.
+    """)
     return
 
 
