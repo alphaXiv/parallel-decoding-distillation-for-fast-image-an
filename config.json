@@ -1,7 +1,7 @@
 {
-  "variant": "midpoint_grid8_80000",
+  "variant": "midpoint_grid8_80000_seed1",
   "target": "midpoint",
-  "train_seed": 0,
+  "train_seed": 1,
   "train_steps": 80000,
   "grid_size": 8,
   "min_block": 2,
