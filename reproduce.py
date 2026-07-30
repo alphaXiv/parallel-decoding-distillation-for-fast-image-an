@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import datetime
 import json
 import math
 import os
@@ -23,9 +24,9 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import DDPMPipeline, UNet2DModel
+from datasets import load_dataset
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler, Subset
-from torchvision.datasets import CIFAR10
 from torchvision.models import Inception_V3_Weights, inception_v3
 from torchvision.transforms import Compose, Normalize, ToTensor
 
@@ -34,12 +35,16 @@ MODEL_ID = "google/ddpm-cifar10-32"
 
 
 def setup_dist() -> tuple[int, int, torch.device]:
-    dist.init_process_group("nccl")
-    rank = dist.get_rank()
-    world = dist.get_world_size()
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
-    return rank, world, torch.device("cuda", local_rank)
+    device = torch.device("cuda", local_rank)
+    # The public CIFAR archive can be slow from some clusters.  Establish the
+    # local-rank device before NCCL and allow rank 0 to finish the one-time
+    # download before the first collective.
+    dist.init_process_group(
+        "nccl", device_id=device, timeout=datetime.timedelta(hours=2)
+    )
+    return dist.get_rank(), dist.get_world_size(), device
 
 
 def seed_all(seed: int) -> None:
@@ -134,15 +139,31 @@ def student_heads(
     return out.reshape(b, n, nc // n, hh, ww).float()
 
 
-def load_data(rank: int, world: int, batch: int) -> tuple[DataLoader, CIFAR10]:
-    root = Path("/tmp/pdd-cifar-data")
+class PublicCIFAR(torch.utils.data.Dataset):
+    def __init__(self, split: str, transform: Compose):
+        self.data = load_dataset("uoft-cs/cifar10", split=split)
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
+        row = self.data[index]
+        return self.transform(row["img"].convert("RGB")), int(row["label"])
+
+
+def load_data(
+    rank: int, world: int, batch: int
+) -> tuple[DataLoader, PublicCIFAR]:
     transform = Compose([ToTensor(), Normalize((0.5,) * 3, (0.5,) * 3)])
+    # Hugging Face hosts the canonical UofT CIFAR-10 data as fast public
+    # parquet shards.  Rank 0 populates the pod-local cache once.
     if rank == 0:
-        CIFAR10(root, train=True, download=True, transform=transform)
-        CIFAR10(root, train=False, download=True, transform=transform)
+        PublicCIFAR("train", transform)
+        PublicCIFAR("test", transform)
     dist.barrier()
-    train = CIFAR10(root, train=True, download=False, transform=transform)
-    test = CIFAR10(root, train=False, download=False, transform=transform)
+    train = PublicCIFAR("train", transform)
+    test = PublicCIFAR("test", transform)
     sampler = DistributedSampler(train, num_replicas=world, rank=rank, shuffle=True)
     loader = DataLoader(
         train,
