@@ -11,7 +11,7 @@ spec:
         - name: reproduce
           image: pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime
           imagePullPolicy: IfNotPresent
-          command: ["bash", "-c", "$ORX_SCRIPT"]
+          command: ["bash", "-c", "eval \"$ORX_SCRIPT\""]
           resources:
             requests:
               nvidia.com/gpu: "4"
