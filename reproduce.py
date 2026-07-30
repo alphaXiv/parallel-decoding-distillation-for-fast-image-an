@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import datetime
 import json
 import math
 import os
@@ -25,7 +24,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import DDPMPipeline, UNet2DModel
 from datasets import load_dataset
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler, Subset
 from torchvision.models import Inception_V3_Weights, inception_v3
 from torchvision.transforms import Compose, Normalize, ToTensor
@@ -35,14 +33,15 @@ MODEL_ID = "google/ddpm-cifar10-32"
 
 
 def setup_dist() -> tuple[int, int, torch.device]:
-    local_rank = int(os.environ["LOCAL_RANK"])
-    torch.cuda.set_device(local_rank)
-    device = torch.device("cuda", local_rank)
-    # The public CIFAR archive can be slow from some clusters.  Establish the
-    # local-rank device before NCCL and allow rank 0 to finish the one-time
-    # download before the first collective.
-    dist.init_process_group("nccl", timeout=datetime.timedelta(hours=2))
-    return dist.get_rank(), dist.get_world_size(), device
+    # Independent one-GPU experiment nodes avoid a reproducible NCCL illegal
+    # memory access on the configured Blackwell cluster/container combination.
+    torch.cuda.set_device(0)
+    return 0, 1, torch.device("cuda", 0)
+
+
+def barrier() -> None:
+    if dist.is_initialized():
+        dist.barrier(device_ids=[torch.cuda.current_device()])
 
 
 def seed_all(seed: int) -> None:
@@ -159,7 +158,7 @@ def load_data(
     if rank == 0:
         PublicCIFAR("train", transform)
         PublicCIFAR("test", transform)
-    dist.barrier(device_ids=[torch.cuda.current_device()])
+    barrier()
     train = PublicCIFAR("train", transform)
     test = PublicCIFAR("test", transform)
     sampler = DistributedSampler(train, num_replicas=world, rank=rank, shuffle=True)
@@ -176,7 +175,7 @@ def load_data(
 
 
 def train_student(
-    student: DDP,
+    student: nn.Module,
     teacher: nn.Module,
     schedule: VPSchedule,
     loader: DataLoader,
@@ -230,8 +229,9 @@ def train_student(
 
         if step == 1 or step % 250 == 0 or step == cfg["train_steps"]:
             reduced = loss.detach().clone()
-            dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
-            reduced /= dist.get_world_size()
+            if dist.is_initialized():
+                dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+                reduced /= dist.get_world_size()
             record = {
                 "step": step,
                 "loss": float(reduced),
@@ -351,6 +351,8 @@ def features(model: nn.Module, images: torch.Tensor, batch: int = 64) -> torch.T
 
 
 def gather_tensor(x: torch.Tensor) -> torch.Tensor:
+    if not dist.is_initialized():
+        return x.cpu()
     slots = [torch.empty_like(x) for _ in range(dist.get_world_size())]
     dist.all_gather(slots, x)
     return torch.cat(slots).cpu()
@@ -399,6 +401,11 @@ def benchmark_ms(fn, noise: torch.Tensor, repeats: int = 3) -> float:
     return 1000 * (time.perf_counter() - start) / repeats
 
 
+@torch.no_grad()
+def batched_generate(fn, noise: torch.Tensor, batch: int) -> torch.Tensor:
+    return torch.cat([fn(chunk) for chunk in noise.split(batch)])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
@@ -434,16 +441,20 @@ def main() -> None:
     history = []
     if cfg["train_steps"] > 0:
         student_raw = make_parallel_student(teacher, cfg["grid_size"]).to(device)
-        student = DDP(student_raw, device_ids=[device.index], broadcast_buffers=False)
+        student = student_raw
         history = train_student(student, teacher, schedule, loader, cfg, rank)
-        student_raw = student.module.eval()
-        dist.barrier(device_ids=[torch.cuda.current_device()])
+        student_raw = student.eval()
+        barrier()
 
     local_n = cfg["eval_samples"] // world
     g = torch.Generator(device=device).manual_seed(cfg["eval_seed"] + rank)
     noise = torch.randn((local_n, 3, 32, 32), generator=g, device=device)
-    ref = teacher_sample(
-        teacher, schedule, noise, cfg["reference_steps"], method="midpoint"
+    ref = batched_generate(
+        lambda z: teacher_sample(
+            teacher, schedule, z, cfg["reference_steps"], method="midpoint"
+        ),
+        noise,
+        cfg["eval_batch"],
     )
 
     # Public evaluation images: fixed first 1,024 CIFAR-10 test examples.
@@ -451,7 +462,7 @@ def main() -> None:
     reals = torch.stack([test[i][0] for i in range(start, start + local_n)]).to(device)
     if rank == 0:
         feature_net = inception_model(device)
-    dist.barrier(device_ids=[torch.cuda.current_device()])
+    barrier()
     if rank != 0:
         feature_net = inception_model(device)
     real_feat = gather_tensor(features(feature_net, reals, cfg["eval_batch"]))
@@ -477,7 +488,13 @@ def main() -> None:
 
     latency_noise = noise[: min(64, local_n)]
     for nfe in (1, 2, 4, 8):
-        sample = teacher_sample(teacher, schedule, noise, nfe, method="euler")
+        sample = batched_generate(
+            lambda z, q=nfe: teacher_sample(
+                teacher, schedule, z, q, method="euler"
+            ),
+            noise,
+            cfg["eval_batch"],
+        )
         feat = gather_tensor(features(feature_net, sample, cfg["eval_batch"]))
         sample_all = gather_tensor(sample)
         result["naive"][str(nfe)] = {
@@ -502,13 +519,17 @@ def main() -> None:
             student_raw, schedule, noise[:2], cfg["grid_size"], 4
         )
         for nfe in (1, 2, 4, 8):
-            sample = pdd_sample(
-                student_raw,
-                schedule,
+            sample = batched_generate(
+                lambda z, q=nfe: pdd_sample(
+                    student_raw,
+                    schedule,
+                    z,
+                    cfg["grid_size"],
+                    q,
+                    fused_sets[q],
+                ),
                 noise,
-                cfg["grid_size"],
-                nfe,
-                fused_sets[nfe],
+                cfg["eval_batch"],
             )
             feat = gather_tensor(features(feature_net, sample, cfg["eval_batch"]))
             sample_all = gather_tensor(sample)
@@ -540,7 +561,8 @@ def main() -> None:
             f"elapsed_wall_s={result['elapsed_wall_s']:.1f}",
             flush=True,
         )
-    dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
