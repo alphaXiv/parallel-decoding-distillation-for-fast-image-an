@@ -1,8 +1,8 @@
 {
-  "variant": "midpoint_seed0",
-  "target": "midpoint",
+  "variant": "euler_80000_frozen_trunk",
+  "target": "euler",
   "train_seed": 0,
-  "train_steps": 8000,
+  "train_steps": 80000,
   "grid_size": 16,
   "min_block": 2,
   "max_block": 16,
@@ -11,5 +11,6 @@
   "eval_batch": 64,
   "reference_steps": 64,
   "learning_rate": 0.00005,
-  "eval_seed": 260726004
+  "eval_seed": 260726004,
+  "freeze_backbone": true
 }

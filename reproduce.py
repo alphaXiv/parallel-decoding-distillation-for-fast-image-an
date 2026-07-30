@@ -185,8 +185,13 @@ def train_student(
     target = cfg["target"]
     ngrid = cfg["grid_size"]
     h = 1.0 / ngrid
+    if cfg.get("freeze_backbone", False):
+        student.requires_grad_(False)
+        student.conv_out.requires_grad_(True)
     optimizer = torch.optim.AdamW(
-        student.parameters(), lr=cfg["learning_rate"], weight_decay=0.0
+        (p for p in student.parameters() if p.requires_grad),
+        lr=cfg["learning_rate"],
+        weight_decay=0.0,
     )
     iterator = iter(loader)
     history: list[dict] = []
