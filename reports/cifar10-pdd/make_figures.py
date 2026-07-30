@@ -106,7 +106,7 @@ def main() -> None:
     plt.axhline(0, color="black", lw=1)
     plt.ylabel("Midpoint relative to Euler at 1 NFE (%)")
     plt.title("Target-method direction at matched budgets")
-    plt.text(0.5, 0.03, "Below zero favors midpoint", transform=plt.gca().transAxes, ha="center", fontsize=9)
+    plt.text(0.98, 0.95, "Below zero favors midpoint", transform=plt.gca().transAxes, ha="right", va="top", fontsize=9)
     for bar, val in zip(bars, relative):
         plt.text(bar.get_x() + bar.get_width() / 2, val + (0.08 if val >= 0 else -0.08), f"{val:+.2f}%", ha="center", va="bottom" if val >= 0 else "top")
     plt.grid(axis="y", alpha=0.22)
