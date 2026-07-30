@@ -41,9 +41,7 @@ def setup_dist() -> tuple[int, int, torch.device]:
     # The public CIFAR archive can be slow from some clusters.  Establish the
     # local-rank device before NCCL and allow rank 0 to finish the one-time
     # download before the first collective.
-    dist.init_process_group(
-        "nccl", device_id=device, timeout=datetime.timedelta(hours=2)
-    )
+    dist.init_process_group("nccl", timeout=datetime.timedelta(hours=2))
     return dist.get_rank(), dist.get_world_size(), device
 
 
@@ -161,7 +159,7 @@ def load_data(
     if rank == 0:
         PublicCIFAR("train", transform)
         PublicCIFAR("test", transform)
-    dist.barrier()
+    dist.barrier(device_ids=[torch.cuda.current_device()])
     train = PublicCIFAR("train", transform)
     test = PublicCIFAR("test", transform)
     sampler = DistributedSampler(train, num_replicas=world, rank=rank, shuffle=True)
@@ -439,7 +437,7 @@ def main() -> None:
         student = DDP(student_raw, device_ids=[device.index], broadcast_buffers=False)
         history = train_student(student, teacher, schedule, loader, cfg, rank)
         student_raw = student.module.eval()
-        dist.barrier()
+        dist.barrier(device_ids=[torch.cuda.current_device()])
 
     local_n = cfg["eval_samples"] // world
     g = torch.Generator(device=device).manual_seed(cfg["eval_seed"] + rank)
@@ -453,7 +451,7 @@ def main() -> None:
     reals = torch.stack([test[i][0] for i in range(start, start + local_n)]).to(device)
     if rank == 0:
         feature_net = inception_model(device)
-    dist.barrier()
+    dist.barrier(device_ids=[torch.cuda.current_device()])
     if rank != 0:
         feature_net = inception_model(device)
     real_feat = gather_tensor(features(feature_net, reals, cfg["eval_batch"]))
