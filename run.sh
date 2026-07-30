@@ -10,5 +10,4 @@ python -m pip install --disable-pip-version-check --no-cache-dir \
   "scipy>=1.13" \
   "pillow>=10"
 
-NPROC="$(python -c 'import torch; print(torch.cuda.device_count())')"
-torchrun --standalone --nproc-per-node="$NPROC" reproduce.py --config config.json
+python reproduce.py --config config.json
