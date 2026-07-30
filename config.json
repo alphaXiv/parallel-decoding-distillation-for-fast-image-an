@@ -1,8 +1,8 @@
 {
-  "variant": "naive",
-  "target": "none",
-  "train_seed": 0,
-  "train_steps": 0,
+  "variant": "midpoint_seed2",
+  "target": "midpoint",
+  "train_seed": 2,
+  "train_steps": 8000,
   "grid_size": 16,
   "min_block": 2,
   "max_block": 16,
