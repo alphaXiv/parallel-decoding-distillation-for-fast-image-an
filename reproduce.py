@@ -176,6 +176,7 @@ def load_data(
 
 def train_student(
     student: nn.Module,
+    ema_student: nn.Module | None,
     teacher: nn.Module,
     schedule: VPSchedule,
     loader: DataLoader,
@@ -226,6 +227,13 @@ def train_student(
         loss.backward()
         torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
         optimizer.step()
+        if ema_student is not None:
+            with torch.no_grad():
+                torch._foreach_lerp_(
+                    list(ema_student.parameters()),
+                    list(student.parameters()),
+                    1.0 - cfg["ema_decay"],
+                )
 
         if step == 1 or step % 250 == 0 or step == cfg["train_steps"]:
             reduced = loss.detach().clone()
@@ -442,8 +450,13 @@ def main() -> None:
     if cfg["train_steps"] > 0:
         student_raw = make_parallel_student(teacher, cfg["grid_size"]).to(device)
         student = student_raw
-        history = train_student(student, teacher, schedule, loader, cfg, rank)
-        student_raw = student.eval()
+        ema_student = None
+        if "ema_decay" in cfg:
+            ema_student = copy.deepcopy(student).requires_grad_(False)
+        history = train_student(
+            student, ema_student, teacher, schedule, loader, cfg, rank
+        )
+        student_raw = (ema_student if ema_student is not None else student).eval()
         barrier()
 
     local_n = cfg["eval_samples"] // world
